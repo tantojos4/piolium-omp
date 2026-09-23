@@ -12,9 +12,9 @@
 
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { backupCorruptFile, writeFileAtomic } from "./atomic-file.ts";
 import { phasesFor } from "./modes.ts";
+import { withFileMutationQueue } from "./omp-compat.ts";
 import { formatPhaseDetailLabel } from "./phase-labels.ts";
 
 /**

@@ -1,5 +1,6 @@
-import { CustomEditor, type KeybindingsManager, type Theme } from "@earendil-works/pi-coding-agent";
+import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { CustomEditor } from "@earendil-works/pi-tui/prompt/custom-editor";
 
 export const PIOLIUM_SRCERY_THEME_NAME = "piolium-srcery";
 export const PIOLIUM_PROMPT_PREFIX = "piolium-audit ▶ ";

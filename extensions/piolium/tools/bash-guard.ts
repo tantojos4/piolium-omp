@@ -28,15 +28,81 @@
  * sandboxed working directory (see the security note in README).
  */
 
+import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
 import {
 	type BashOperations,
 	type BashSpawnContext,
 	type ToolDefinition,
 	createBashToolDefinition,
-	createLocalBashOperations,
 } from "@earendil-works/pi-coding-agent";
 import { tokenizeCommandArgs } from "../command-target.ts";
 import { readBooleanEnv, readPositiveIntEnv, readTrimmedEnv } from "../retry.ts";
+
+/**
+ * Local shell backend for the guarded `bash` tool.
+ *
+ * Pi ships this as `createLocalBashOperations`, but omp's legacy-pi shim
+ * (`@earendil-works/pi-coding-agent` → `omp-legacy-pi-bundled:
+ * @oh-my-pi/pi-coding-agent`) does not re-export it, so a package that imports
+ * the helper fails validation at load. The surface is small and stable, so we
+ * implement it here instead of depending on the host re-exporting it.
+ */
+function localBashOperations(shellPath?: string): BashOperations {
+	const shell = shellPath ?? process.env.SHELL ?? "/bin/bash";
+	return {
+		exec: async (command, cwd, { onData, signal, timeout, env }) => {
+			const timeoutMs = timeout === undefined ? undefined : timeout * 1000;
+			// Reject an unusable cwd with an actionable message rather than a bare
+			// ENOENT from the spawn below.
+			await access(cwd).catch(() => {
+				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
+			});
+			const child = spawn(shell, ["-c", command], {
+				cwd,
+				detached: process.platform !== "win32",
+				env: env ?? process.env,
+				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
+			});
+			const killTree = () => {
+				if (!child.pid) return;
+				try {
+					process.kill(-child.pid, "SIGKILL");
+				} catch {
+					child.kill("SIGKILL");
+				}
+			};
+			let timedOut = false;
+			const timeoutHandle =
+				timeoutMs === undefined
+					? undefined
+					: setTimeout(() => {
+							timedOut = true;
+							killTree();
+						}, timeoutMs);
+			const onAbort = () => killTree();
+			try {
+				child.stdout?.on("data", onData);
+				child.stderr?.on("data", onData);
+				if (signal) {
+					if (signal.aborted) onAbort();
+					else signal.addEventListener("abort", onAbort, { once: true });
+				}
+				const exitCode = await new Promise<number | null>((resolve, reject) => {
+					child.on("error", reject);
+					child.on("close", resolve);
+				});
+				if (signal?.aborted) throw new Error("aborted");
+				if (timedOut) throw new Error(`timeout:${timeout}`);
+				return { exitCode };
+			} finally {
+				clearTimeout(timeoutHandle);
+				if (signal) signal.removeEventListener("abort", onAbort);
+			}
+		},
+	};
+}
 
 /** Applied when the model omits `timeout`. 15 min is well past any sane repo-scoped command. */
 export const DEFAULT_BASH_TIMEOUT_MS = 15 * 60 * 1000;
@@ -343,10 +409,7 @@ export function createGuardedBashTool(
 ): ToolDefinition {
 	const policy = resolveBashTimeoutPolicy();
 	const definition = createBashToolDefinition(cwd, {
-		operations: withBashTimeout(
-			createLocalBashOperations(options.shellPath ? { shellPath: options.shellPath } : {}),
-			policy,
-		),
+		operations: withBashTimeout(localBashOperations(options.shellPath), policy),
 		...(options.commandPrefix ? { commandPrefix: options.commandPrefix } : {}),
 		...(options.shellPath ? { shellPath: options.shellPath } : {}),
 		spawnHook: createBashGuardSpawnHook(),

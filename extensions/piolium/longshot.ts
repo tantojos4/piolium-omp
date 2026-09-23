@@ -22,9 +22,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { writeFileAtomic } from "./atomic-file.ts";
 import { readCandidateScores } from "./candidate-scan.ts";
+import { withFileMutationQueue } from "./omp-compat.ts";
 
 export interface LongshotTarget {
 	path: string;
